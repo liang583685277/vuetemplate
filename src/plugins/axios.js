@@ -1,8 +1,12 @@
 'use strict'
 
 // import Vue from 'vue'
-import axIos from 'axios'
-import {Loading, Message} from "element-ui";
+import axIos from 'axios';
+import store from '../store'
+import { Message} from "element-ui";
+import router from "vue-router";
+
+const _Message = Message;
 // import QS from 'qs';
 
 // Full config:  https://github.com/axios/axios#request-config
@@ -10,17 +14,39 @@ import {Loading, Message} from "element-ui";
 axIos.defaults.headers.post['Content-Type'] = 'application/json;charset=utf-8';
 axIos.defaults.headers['Content-Type'] = 'application/json;charset=utf-8';
 // axIos.defaults.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+axIos.defaults.withCredentials = true
+
+let pending = [];//声明一个数组用于存储每个ajax请求的取消函数盒ajax标识
+let CancelToken = axIos.CancelToken;
+
+//防止重复请求
+let removePending = (ever) => {
+    pending.forEach((item, index) => {
+        if (item.u === ever.url + '&' + ever.method) {//当前请求在数组中存在时执行函数
+            item.f(); //取消执行操作
+            pending.splice(index, 1)
+        }
+    })
+}
+//取消全部请求
+let removerAllPending = () => {
+    if (pending.length > 0) {
+        for (let p in pending) {
+            pending[p].f()
+        }
+        pending = []
+    }
+}
 
 let config = {
-    // baseURL: process.env.baseURL || process.env.apiUrl || ""
     baseURL: process.env.VUE_APP_BASE_API,
     timeout: 10 * 1000, // Timeout
     // withCredentials: true, // Check cross-site Access-Control
 }
 
-let loading_axios = null
+// let loading_axios = null
 
-const _axios = axIos.create(config)
+const createAxIos = axIos.create(config)
 
 let httpCode = {        //这里我简单列出一些常见的http状态码信息，可以自己去调整配置
     400: '请求参数错误',
@@ -34,12 +60,20 @@ let httpCode = {        //这里我简单列出一些常见的http状态码信�
 }
 
 /** 添加请求拦截器 **/
-_axios.interceptors.request.use(config => {
-    config.headers['token'] = sessionStorage.getItem('token') || ''
-    loading_axios = Loading.service({       // 发起请求时加载全局loading，请求失败或有响应时会关闭
-        spinner: 'fa fa-spinner fa-spin fa-3x fa-fw',
-        text: '拼命加载中...'
+createAxIos.interceptors.request.use(config => {
+    if (store.state.cancelStatic) {
+        removerAllPending();
+        store.commit('cancelStatic', false);
+    }
+    config.headers["Authorization"] = sessionStorage.getItem('token') || ''
+    removePending(config);
+    config.cancelToken = new CancelToken((c) => {
+        pending.push({u: config.url + '&' + config.method, f: c})
     })
+    // loading_axios = Loading.service({       // 发起请求时加载全局loading，请求失败或有响应时会关闭
+    //     spinner: 'fa fa-spinner fa-spin fa-3x fa-fw',
+    //     text: '拼命加载中...'
+    // })
     if (config.method === 'get') { // 添加时间戳参数，防止浏览器（IE）对get请求的缓存
         config.params = {
             ...config.params,
@@ -55,17 +89,17 @@ _axios.interceptors.request.use(config => {
         config.headers['Content-Type'] = 'multipart/form-data'
     }
     return config
-}, error=> {
+}, error => {
     // 对请求错误做些什么
     return Promise.reject(error)
 })
 
 /** 添加响应拦截器  **/
-_axios.interceptors.response.use(response => {
-    loading_axios.close()
+createAxIos.interceptors.response.use(response => {
+    // loading_axios.close()
+    removePending(response.config)
     if (response.status === 200) {
-        return response.data
-        // return Promise.resolve(response.data)
+        return Promise.resolve(response.data)
     } else {
         Message({
             message: response.data.message,
@@ -74,23 +108,26 @@ _axios.interceptors.response.use(response => {
         return Promise.reject(response.data.message)
     }
 }, error => {
-    loading_axios.close()
-    console.log(error)
+    // loading_axios.close()
     if (error.response) {
         // 根据请求失败的http状态码去给用户相应的提示
         let tips = error.response.status in httpCode ? httpCode[error.response.status] : error.response.data.message
-        Message({
+        _Message({
             message: tips,
             type: 'error'
         })
+        if (error.response.status === 404){
+            router.push('/404')
+        }
         if (error.response.status === 401) {    // token或者登陆失效情况下跳转到登录页面，根据实际情况，在这里可以根据不同的响应错误结果，做对应的事。这里我以401判断为例
+            sessionStorage.clear()
             // router.push({
             //     path: `/login`
             // })
         }
         return Promise.reject(error)
     } else {
-        Message({
+        _Message({
             message: '请求超时, 请刷新重试',
             type: 'error'
         })
@@ -101,7 +138,7 @@ _axios.interceptors.response.use(response => {
 /* 统一封装get请求 */
 export const getAjax = (url, params, config = {}) => {
     return new Promise((resolve, reject) => {
-        _axios({
+        createAxIos({
             method: 'get',
             url,
             params,
@@ -117,7 +154,7 @@ export const getAjax = (url, params, config = {}) => {
 /* 统一封装post请求  */
 export const postAjax = (url, data, config = {}) => {
     return new Promise((resolve, reject) => {
-        _axios({
+        createAxIos({
             method: 'post',
             url,
             data,
@@ -130,51 +167,7 @@ export const postAjax = (url, data, config = {}) => {
     })
 }
 
-
-// _axios.interceptors.request.use(
-//     function (config) {
-//         // Do something before request is sent
-//         if (localStorage.getItem('token')) {
-//             config.headers.Authorization = sessionStorage.getItem('token');
-//         }
-//         return config
-//     },
-//     function (error) {
-//         // Do something with request error
-//         return Promise.reject(error)
-//     }
-// )
-
-// Add a response interceptor
-// _axios.interceptors.response.use(
-//     function (response) {
-//         // Do something with response data
-//         return response
-//     },
-//     function (error) {
-//         // Do something with response error
-//         return Promise.reject(error)
-//     }
-// )
-
-// eslint-disable-next-line no-unused-vars
-// Plugin.install = function (Vue, options) {
-//     Vue.axios = _axios
-//     window.axios = _axios
-//     Object.defineProperties(Vue.prototype, {
-//         axios: {
-//             get() {
-//                 return _axios
-//             }
-//         },
-//         $axios: {
-//             get() {
-//                 return _axios
-//             }
-//         }
-//     })
+/* 中断请求 */
+// export const cancelAxIos = () =>{
+//     source.token
 // }
-//
-// Vue.use(Plugin)
-//
-// export default Plugin

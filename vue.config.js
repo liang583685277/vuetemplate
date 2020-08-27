@@ -11,6 +11,14 @@ module.exports = {
     host: '0.0.0.0',
     port: 8081,
     https: false,
+    watchOptions: {
+      // 不监听的文件或文件夹，支持正则匹配
+      ignored: /node_modules/,
+      // 监听到变化后等300ms再去执行动作
+      aggregateTimeout: 300,
+      // 默认每秒询问1000次
+      poll: 1000
+    },
     hotOnly:true,
     proxy: {
       [process.env.VUE_APP_BASE_API]: {
@@ -23,6 +31,6 @@ module.exports = {
     }, // 设置代理
     // eslint-disable-next-line no-unused-vars
     before: app => {
-    }
-  },
+    },
+  }
 }
